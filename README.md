@@ -1,4 +1,4 @@
-# aqkanji2koe-openjtalk
+# AqKanji2Koe-OpenJTalk
 
 漢字かな交じりテキストを AquesTalk 用音声記号列に変換する Rust ライブラリ・CLIツール・C ABI ライブラリです。
 日本語解析に [jpreprocess](https://github.com/jpreprocess/jpreprocess)（OpenJTalk の Rust 実装）と NAIST-JDic を使用します。
