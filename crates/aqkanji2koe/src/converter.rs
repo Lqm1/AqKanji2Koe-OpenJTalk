@@ -27,8 +27,6 @@ pub enum Delimiter {
     Slash,
     /// `+` に対応する副次アクセント句区切り。
     Plus,
-    /// 半角スペースに対応する区切り記号。
-    Space,
 }
 
 impl Delimiter {
@@ -41,7 +39,6 @@ impl Delimiter {
                 Self::Semicolon => ";",
                 Self::Slash => "/",
                 Self::Plus => "+",
-                Self::Space => " ",
             },
             OutputFormat::Roman => match self {
                 Self::Period => ".",
@@ -50,7 +47,6 @@ impl Delimiter {
                 Self::Semicolon => ";",
                 Self::Slash => "/",
                 Self::Plus => "+",
-                Self::Space => " ",
             },
         }
     }
@@ -65,10 +61,7 @@ impl Delimiter {
 
     /// ポーズを伴う区切りかどうかを返す。
     pub fn is_before_pause(self) -> bool {
-        matches!(
-            self,
-            Self::Period | Self::Question | Self::Comma | Self::Space
-        )
+        matches!(self, Self::Period | Self::Question | Self::Comma)
     }
 
     fn is_sentence_end(self) -> bool {
@@ -214,7 +207,7 @@ fn delimiter_from_pronless_symbol(symbol: &str) -> Option<Delimiter> {
         "？" | "?" => Some(Delimiter::Question),
         "！" | "!" => Some(Delimiter::Period),
         "…" | "⋯" => Some(Delimiter::Period),
-        "　" | " " => Some(Delimiter::Space),
+        "　" | " " => Some(Delimiter::Comma),
         _ => None,
     }
 }
@@ -225,6 +218,7 @@ fn delimiter_from_ascii_symbol(symbol: &str) -> Option<Delimiter> {
         "," => Some(Delimiter::Comma),
         "?" => Some(Delimiter::Question),
         "!" => Some(Delimiter::Period),
+        " " => Some(Delimiter::Comma),
         _ => None,
     }
 }
@@ -393,6 +387,18 @@ mod tests {
         let nodes = [
             spoken_node(&[("コ", true), ("レ", true)], 0, false),
             ascii_symbol_node(","),
+            spoken_node(&[("デ", true)], 1, false),
+        ];
+
+        assert_eq!(nodes_to_phoneme(&nodes, OutputFormat::Kana), "これ、で'。");
+        assert_eq!(nodes_to_phoneme(&nodes, OutputFormat::Roman), "kore,de'.");
+    }
+
+    #[test]
+    fn spaces_are_normalized_to_commas() {
+        let nodes = [
+            spoken_node(&[("コ", true), ("レ", true)], 0, false),
+            ascii_symbol_node(" "),
             spoken_node(&[("デ", true)], 1, false),
         ];
 
