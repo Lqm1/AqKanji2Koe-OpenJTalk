@@ -89,11 +89,35 @@ println!("{roman}"); // nihonngono/te'_kisutode_su.
 GitHub のタグ `v*` でリリースすると、GitHub Releases に OS ごとの C ABI バンドルを自動添付します。
 バンドルにはライブラリ本体、C ヘッダ `include/aqkanji2koe.h`、`README.md` が含まれます。
 
+現状の自動配布対象:
+
+- Windows 64-bit (`x86_64-pc-windows-msvc`)
+- Windows 32-bit (`i686-pc-windows-msvc`)
+- Windows ARM64 (`aarch64-pc-windows-msvc`)
+- Linux 64-bit (`x86_64-unknown-linux-gnu`)
+- Linux ARM64 (`aarch64-unknown-linux-gnu`)
+- macOS Intel (`x86_64-apple-darwin`)
+- macOS Apple Silicon (`aarch64-apple-darwin`)
+- Android (`armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`)
+- iOS (`aqkanji2koe.xcframework`: device arm64 + simulator arm64/x86_64)
+
+補足:
+
+- iOS は通常の `.dylib` 配布ではなく、Xcode に取り込みやすい `XCFramework` を配布します。
+- Android は ABI ごとの `libaqkanji2koe.so` をまとめた ZIP を配布します。
+- bare-metal 向けの `no_std` 組み込みターゲットは非対応です。`jpreprocess` と辞書データを使う都合上、OS と標準ライブラリを前提にしています。
+
 例:
 
 - `aqkanji2koe-capi-v0.1.0-x86_64-pc-windows-msvc.zip`
+- `aqkanji2koe-capi-v0.1.0-i686-pc-windows-msvc.zip`
+- `aqkanji2koe-capi-v0.1.0-aarch64-pc-windows-msvc.zip`
 - `aqkanji2koe-capi-v0.1.0-x86_64-unknown-linux-gnu.zip`
+- `aqkanji2koe-capi-v0.1.0-aarch64-unknown-linux-gnu.zip`
+- `aqkanji2koe-capi-v0.1.0-x86_64-apple-darwin.zip`
 - `aqkanji2koe-capi-v0.1.0-aarch64-apple-darwin.zip`
+- `aqkanji2koe-capi-v0.1.0-android.zip`
+- `aqkanji2koe-capi-v0.1.0-ios-xcframework.zip`
 
 ### ビルド
 

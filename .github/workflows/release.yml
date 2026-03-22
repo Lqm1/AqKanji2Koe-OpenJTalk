@@ -4,21 +4,106 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create a draft GitHub Release"
+        required: true
+        default: false
+        type: boolean
+      release_tag:
+        description: "Tag to use when create_release is true (example: v0.1.0-test1)"
+        required: false
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CAPI_CRATE: aqkanji2koe-capi
+
 jobs:
-  build-capi:
-    name: Build C ABI (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  prepare:
+    name: Prepare metadata
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_tag: ${{ steps.meta.outputs.artifact_tag }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      should_publish: ${{ steps.meta.outputs.should_publish }}
+
+    steps:
+      - id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            artifact_tag="${GITHUB_REF_NAME}"
+            release_tag="${GITHUB_REF_NAME}"
+            should_publish="true"
+          else
+            input_tag="${{ inputs.release_tag }}"
+            if [[ -n "${input_tag}" ]]; then
+              artifact_tag="${input_tag}"
+              release_tag="${input_tag}"
+            else
+              artifact_tag="manual-${GITHUB_RUN_NUMBER}"
+              release_tag=""
+            fi
+
+            if [[ "${{ inputs.create_release }}" == "true" ]]; then
+              if [[ -z "${release_tag}" ]]; then
+                echo "release_tag input is required when create_release is true" >&2
+                exit 1
+              fi
+              should_publish="true"
+            else
+              should_publish="false"
+            fi
+          fi
+
+          echo "artifact_tag=${artifact_tag}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "should_publish=${should_publish}" >> "$GITHUB_OUTPUT"
+
+  build-desktop:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
+        include:
+          - label: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+          - label: windows-x86
+            runner: windows-latest
+            target: i686-pc-windows-msvc
+            platform: windows
+          - label: windows-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            platform: windows
+          - label: linux-x64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+          - label: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux
+          - label: macos-x64
+            runner: macos-13
+            target: x86_64-apple-darwin
+            platform: macos
+          - label: macos-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
 
     steps:
       - uses: actions/checkout@v4
@@ -26,63 +111,146 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build release binary
-        run: cargo build --release -p aqkanji2koe-capi
+      - name: Install target
+        shell: bash
+        run: rustup target add ${{ matrix.target }}
 
-      - name: Package C ABI bundle
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $host = ((rustc -vV | Select-String '^host:').ToString() -replace '^host:\s*', '').Trim()
-          $bundle = "aqkanji2koe-capi-$tag-$host"
-          $stage = Join-Path $PWD $bundle
+      - name: Build C ABI artifacts
+        shell: bash
+        run: cargo build --release -p ${{ env.CAPI_CRATE }} --target ${{ matrix.target }}
 
-          New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item include/aqkanji2koe.h $stage
-          Copy-Item README.md $stage
-
-          $files = switch ($env:RUNNER_OS) {
-            "Windows" { @("aqkanji2koe.dll", "aqkanji2koe.dll.lib", "aqkanji2koe.lib", "aqkanji2koe.pdb") }
-            "Linux"   { @("libaqkanji2koe.so", "libaqkanji2koe.a") }
-            "macOS"   { @("libaqkanji2koe.dylib", "libaqkanji2koe.a") }
-            default   { throw "Unsupported runner OS: $env:RUNNER_OS" }
-          }
-
-          foreach ($name in $files) {
-            $src = Get-ChildItem target/release -Recurse -Filter $name | Select-Object -First 1
-            if (-not $src) {
-              throw "Missing build artifact: $name"
-            }
-            Copy-Item $src.FullName $stage
-          }
-
-          Compress-Archive -Path $stage -DestinationPath "$bundle.zip"
+      - name: Package release bundle
+        shell: bash
+        run: bash ./scripts/package-capi-bundle.sh "${{ needs.prepare.outputs.artifact_tag }}" "${{ matrix.target }}" "${{ matrix.platform }}"
 
       - name: Upload packaged bundle
         uses: actions/upload-artifact@v4
         with:
-          name: capi-${{ matrix.os }}
-          path: aqkanji2koe-capi-*.zip
+          name: ${{ matrix.label }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-android:
+    name: Build android
+    runs-on: ubuntu-latest
+    needs: prepare
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Android targets
+        shell: bash
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and cargo-ndk
+        shell: bash
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          cargo install cargo-ndk --locked
+
+      - name: Build Android shared libraries
+        shell: bash
+        run: |
+          rm -rf android-jni
+          cargo ndk -t armeabi-v7a -t arm64-v8a -t x86 -t x86_64 -o android-jni build --release -p "${CAPI_CRATE}"
+
+      - name: Package Android bundle
+        shell: bash
+        run: bash ./scripts/package-android-bundle.sh "${{ needs.prepare.outputs.artifact_tag }}"
+
+      - name: Upload Android bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-ios:
+    name: Build ios-xcframework
+    runs-on: macos-latest
+    needs: prepare
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Apple targets
+        shell: bash
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - name: Build iOS static libraries
+        shell: bash
+        run: |
+          cargo build --release -p "${CAPI_CRATE}" --target aarch64-apple-ios
+          cargo build --release -p "${CAPI_CRATE}" --target aarch64-apple-ios-sim
+          cargo build --release -p "${CAPI_CRATE}" --target x86_64-apple-ios
+
+      - name: Create XCFramework bundle
+        shell: bash
+        run: |
+          rm -rf build/ios-sim dist/aqkanji2koe.xcframework
+          mkdir -p build/ios-sim
+          lipo -create \
+            target/aarch64-apple-ios-sim/release/libaqkanji2koe.a \
+            target/x86_64-apple-ios/release/libaqkanji2koe.a \
+            -output build/ios-sim/libaqkanji2koe.a
+
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libaqkanji2koe.a \
+            -headers include \
+            -library build/ios-sim/libaqkanji2koe.a \
+            -headers include \
+            -output dist/aqkanji2koe.xcframework
+
+      - name: Package iOS bundle
+        shell: bash
+        run: bash ./scripts/package-ios-bundle.sh "${{ needs.prepare.outputs.artifact_tag }}"
+
+      - name: Upload iOS bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/*.zip
           if-no-files-found: error
 
   publish-release:
-    name: Publish Release
+    name: Publish release
     runs-on: ubuntu-latest
-    needs: build-capi
+    if: needs.prepare.outputs.should_publish == 'true'
+    needs:
+      - prepare
+      - build-desktop
+      - build-android
+      - build-ios
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download packaged bundles
+        uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
 
       - name: Generate checksums
-        working-directory: dist
-        run: sha256sum *.zip > SHA256SUMS.txt
+        shell: bash
+        run: |
+          cd dist
+          sha256sum *.zip > SHA256SUMS.txt
 
-      - name: Publish GitHub release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.release_tag }}
+          name: ${{ needs.prepare.outputs.release_tag }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
           generate_release_notes: true
           files: |
             dist/*.zip
