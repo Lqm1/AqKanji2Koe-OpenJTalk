@@ -25,6 +25,8 @@ concurrency:
 
 env:
   CAPI_CRATE: aqkanji2koe-capi
+  ANDROID_CMDLINE_TOOLS_VERSION: "12266719"
+  ANDROID_CMDLINE_TOOLS_SHORT_VERSION: "16.0"
 
 jobs:
   prepare:
@@ -102,7 +104,7 @@ jobs:
             platform: macos
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -120,7 +122,7 @@ jobs:
         run: bash ./scripts/package-capi-bundle.sh "${{ needs.prepare.outputs.artifact_tag }}" "${{ matrix.target }}" "${{ matrix.platform }}"
 
       - name: Upload packaged bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.label }}
           path: dist/*.zip
@@ -132,7 +134,7 @@ jobs:
     needs: prepare
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -141,13 +143,32 @@ jobs:
         shell: bash
         run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install Android SDK command-line tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/.android/sdk}"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          tools_dir="$ANDROID_SDK_ROOT/cmdline-tools/${ANDROID_CMDLINE_TOOLS_SHORT_VERSION}"
+          if [[ ! -x "$tools_dir/bin/sdkmanager" ]]; then
+            tmp_dir="$(mktemp -d)"
+            archive="commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip"
+            curl -fsSL "https://dl.google.com/android/repository/${archive}" -o "${tmp_dir}/cmdline-tools.zip"
+            unzip -q "${tmp_dir}/cmdline-tools.zip" -d "${tmp_dir}"
+            mkdir -p "$tools_dir"
+            cp -R "${tmp_dir}/cmdline-tools/." "$tools_dir/"
+            rm -rf "$tmp_dir"
+          fi
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$tools_dir/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
       - name: Install Android NDK and cargo-ndk
         shell: bash
         run: |
-          sdkmanager "ndk;27.2.12479018"
+          yes | sdkmanager --licenses
+          sdkmanager "platform-tools" "ndk;27.2.12479018"
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
           cargo install cargo-ndk --locked
 
@@ -162,7 +183,7 @@ jobs:
         run: bash ./scripts/package-android-bundle.sh "${{ needs.prepare.outputs.artifact_tag }}"
 
       - name: Upload Android bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: android
           path: dist/*.zip
@@ -174,7 +195,7 @@ jobs:
     needs: prepare
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -212,7 +233,7 @@ jobs:
         run: bash ./scripts/package-ios-bundle.sh "${{ needs.prepare.outputs.artifact_tag }}"
 
       - name: Upload iOS bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ios
           path: dist/*.zip
@@ -230,7 +251,7 @@ jobs:
 
     steps:
       - name: Download packaged bundles
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
