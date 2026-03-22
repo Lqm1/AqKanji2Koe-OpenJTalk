@@ -167,7 +167,9 @@ jobs:
       - name: Install Android NDK and cargo-ndk
         shell: bash
         run: |
+          set +o pipefail
           yes | sdkmanager --licenses
+          set -o pipefail
           sdkmanager "platform-tools" "ndk;27.2.12479018"
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
           cargo install cargo-ndk --locked
