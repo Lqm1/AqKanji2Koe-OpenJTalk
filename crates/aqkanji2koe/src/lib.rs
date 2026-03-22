@@ -36,6 +36,8 @@ use converter::{nodes_to_phoneme, NodeData};
 use jpreprocess::kind::JPreprocessDictionaryKind;
 use jpreprocess::{JPreprocess, SystemDictionaryConfig};
 
+type ProcessFn = dyn Fn(&str) -> Result<Vec<NodeData>> + Send + Sync;
+
 // ── AqKanji2Koe 本体 ────────────────────────────────────────────────────────
 
 /// 漢字かな交じりテキスト → AquesTalk 音声記号列 変換器
@@ -44,7 +46,7 @@ use jpreprocess::{JPreprocess, SystemDictionaryConfig};
 /// スレッド間で共有可能 (`Send + Sync`)。
 pub struct AqKanji2Koe {
     /// テキスト → NodeData 列 の処理関数（型消去済み）
-    process: Box<dyn Fn(&str) -> Result<Vec<NodeData>> + Send + Sync>,
+    process: Box<ProcessFn>,
 }
 
 impl AqKanji2Koe {
@@ -82,10 +84,13 @@ impl AqKanji2Koe {
                         .moras()
                         .iter()
                         .map(|m| {
-                            let s = m.to_string();
+                            let rendered = m.to_string();
                             // U+2019 RIGHT SINGLE QUOTATION MARK を除去
-                            let kata = s.strip_suffix('\u{2019}').unwrap_or(&s).to_string();
-                            (kata, m.is_voiced)
+                            let katakana = rendered
+                                .strip_suffix('\u{2019}')
+                                .unwrap_or(&rendered)
+                                .to_string();
+                            (katakana, m.is_voiced)
                         })
                         .collect();
                     NodeData {
@@ -106,6 +111,11 @@ impl AqKanji2Koe {
         Ok(Self { process })
     }
 
+    fn convert_with_format(&self, text: &str, format: OutputFormat) -> Result<String> {
+        let nodes = (self.process)(text)?;
+        Ok(nodes_to_phoneme(&nodes, format))
+    }
+
     // ── かな出力 ───────────────────────────────────────────────────────────
 
     /// 漢字かな交じりテキストを **かな音声記号列** (UTF-8) に変換する。
@@ -116,8 +126,7 @@ impl AqKanji2Koe {
     ///
     /// jpreprocess の処理に失敗した場合に [`Error::Processing`] を返す。
     pub fn convert(&self, text: &str) -> Result<String> {
-        let nodes = (self.process)(text)?;
-        Ok(nodes_to_phoneme(&nodes, OutputFormat::Kana))
+        self.convert_with_format(text, OutputFormat::Kana)
     }
 
     // ── ローマ字出力 ───────────────────────────────────────────────────────
@@ -130,8 +139,7 @@ impl AqKanji2Koe {
     ///
     /// jpreprocess の処理に失敗した場合に [`Error::Processing`] を返す。
     pub fn convert_roman(&self, text: &str) -> Result<String> {
-        let nodes = (self.process)(text)?;
-        Ok(nodes_to_phoneme(&nodes, OutputFormat::Roman))
+        self.convert_with_format(text, OutputFormat::Roman)
     }
 }
 

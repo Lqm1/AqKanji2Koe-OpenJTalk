@@ -36,33 +36,47 @@ pub enum Delimiter {
 }
 
 impl Delimiter {
-    pub fn kana_str(self) -> &'static str {
-        match self {
-            Self::Period    => "。",
-            Self::Question  => "？",
-            Self::Comma     => "、",
-            Self::Semicolon => ";",
-            Self::Slash     => "/",
-            Self::Plus      => "+",
-            Self::Space     => " ",
+    fn as_str(self, format: OutputFormat) -> &'static str {
+        match format {
+            OutputFormat::Kana => match self {
+                Self::Period => "。",
+                Self::Question => "？",
+                Self::Comma => "、",
+                Self::Semicolon => ";",
+                Self::Slash => "/",
+                Self::Plus => "+",
+                Self::Space => " ",
+            },
+            OutputFormat::Roman => match self {
+                Self::Period => ".",
+                Self::Question => "?",
+                Self::Comma => ",",
+                Self::Semicolon => ";",
+                Self::Slash => "/",
+                Self::Plus => "+",
+                Self::Space => " ",
+            },
         }
     }
 
+    pub fn kana_str(self) -> &'static str {
+        self.as_str(OutputFormat::Kana)
+    }
+
     pub fn roman_str(self) -> &'static str {
-        match self {
-            Self::Period    => ".",
-            Self::Question  => "?",
-            Self::Comma     => ",",
-            Self::Semicolon => ";",
-            Self::Slash     => "/",
-            Self::Plus      => "+",
-            Self::Space     => " ",
-        }
+        self.as_str(OutputFormat::Roman)
     }
 
     /// ポーズを伴う区切りか（無声化判定に使用）
     pub fn is_before_pause(self) -> bool {
-        matches!(self, Self::Period | Self::Question | Self::Comma | Self::Space)
+        matches!(
+            self,
+            Self::Period | Self::Question | Self::Comma | Self::Space
+        )
+    }
+
+    fn is_sentence_end(self) -> bool {
+        matches!(self, Self::Period | Self::Question)
     }
 }
 
@@ -107,25 +121,27 @@ enum Item {
 
 // ── フレーズ構築 ─────────────────────────────────────────────────────────────
 
+fn flush_phrase(items: &mut Vec<Item>, moras: &mut Vec<(String, bool)>, accent: usize) {
+    if moras.is_empty() {
+        return;
+    }
+
+    items.push(Item::Phrase(AccentPhrase {
+        moras: std::mem::take(moras),
+        accent,
+    }));
+}
+
 /// NJD ノード列をアクセント句と区切り記号のアイテム列に変換する
 fn build_items(nodes: &[NodeData]) -> Vec<Item> {
     let mut items: Vec<Item> = Vec::new();
     let mut cur_moras: Vec<(String, bool)> = Vec::new();
     let mut cur_accent: usize = 0;
 
-    let flush = |items: &mut Vec<Item>, moras: &mut Vec<(String, bool)>, accent: usize| {
-        if !moras.is_empty() {
-            items.push(Item::Phrase(AccentPhrase {
-                moras: moras.drain(..).collect(),
-                accent,
-            }));
-        }
-    };
-
     for node in nodes {
         // ── 区切り記号ノード ──────────────────────────────────────────────
         if let Some(delim) = detect_delimiter(node) {
-            flush(&mut items, &mut cur_moras, cur_accent);
+            flush_phrase(&mut items, &mut cur_moras, cur_accent);
             items.push(Item::Delim(delim));
             continue;
         }
@@ -138,7 +154,7 @@ fn build_items(nodes: &[NodeData]) -> Vec<Item> {
         // ── 通常の発音ノード ──────────────────────────────────────────────
         if !node.chain_with_prev || cur_moras.is_empty() {
             // 新しいアクセント句の始まり
-            flush(&mut items, &mut cur_moras, cur_accent);
+            flush_phrase(&mut items, &mut cur_moras, cur_accent);
             cur_accent = node.accent;
         }
         // このノードのモーラを追加
@@ -146,7 +162,7 @@ fn build_items(nodes: &[NodeData]) -> Vec<Item> {
     }
 
     // 残ったモーラをフラッシュ
-    flush(&mut items, &mut cur_moras, cur_accent);
+    flush_phrase(&mut items, &mut cur_moras, cur_accent);
     items
 }
 
@@ -185,7 +201,7 @@ fn pair_phrases(items: Vec<Item>) -> Vec<(AccentPhrase, Delimiter)> {
     // 末尾が Period/Question でない場合は Period を付加
     if result
         .last()
-        .map(|(_, d)| !matches!(d, Delimiter::Period | Delimiter::Question))
+        .map(|(_, d)| !d.is_sentence_end())
         .unwrap_or(false)
     {
         if let Some(last) = result.last_mut() {
@@ -205,36 +221,38 @@ fn detect_delimiter(node: &NodeData) -> Option<Delimiter> {
     let s = node.original.as_str();
 
     if node.is_touten || node.is_pron_empty {
-        return match s {
-            "。" | "." | "．" => Some(Delimiter::Period),
-            "、" | "，"       => Some(Delimiter::Comma),
-            "？" | "?"        => Some(Delimiter::Question),
-            "！" | "!"        => Some(Delimiter::Period),
-            "…" | "⋯"        => Some(Delimiter::Period),
-            "　"              => Some(Delimiter::Space),
-            " "               => Some(Delimiter::Space),
-            _ => {
-                if node.is_touten {
-                    Some(Delimiter::Comma)
-                } else {
-                    None
-                }
-            }
-        };
+        return delimiter_from_pronless_symbol(s)
+            .or_else(|| node.is_touten.then_some(Delimiter::Comma));
     }
 
     // 半角記号が入力に含まれていた場合も検出
     if node.pron_moras.is_empty() {
-        return match s {
-            "." => Some(Delimiter::Period),
-            "," => Some(Delimiter::Comma),
-            "?" => Some(Delimiter::Question),
-            "!" => Some(Delimiter::Period),
-            _ => None,
-        };
+        return delimiter_from_ascii_symbol(s);
     }
 
     None
+}
+
+fn delimiter_from_pronless_symbol(symbol: &str) -> Option<Delimiter> {
+    match symbol {
+        "。" | "." | "．" => Some(Delimiter::Period),
+        "、" | "，" => Some(Delimiter::Comma),
+        "？" | "?" => Some(Delimiter::Question),
+        "！" | "!" => Some(Delimiter::Period),
+        "…" | "⋯" => Some(Delimiter::Period),
+        "　" | " " => Some(Delimiter::Space),
+        _ => None,
+    }
+}
+
+fn delimiter_from_ascii_symbol(symbol: &str) -> Option<Delimiter> {
+    match symbol {
+        "." => Some(Delimiter::Period),
+        "," => Some(Delimiter::Comma),
+        "?" => Some(Delimiter::Question),
+        "!" => Some(Delimiter::Period),
+        _ => None,
+    }
 }
 
 // ── フォーマット ──────────────────────────────────────────────────────────────
@@ -295,7 +313,7 @@ fn format_phrase_roman(phrase: &AccentPhrase) -> String {
                 } else {
                     katakana_mora_to_roman(next_mora)
                 };
-                get_doubling_consonant(next_roman)
+                get_doubling_consonant(next_roman.strip_prefix('_').unwrap_or(next_roman))
             } else {
                 None
             };
@@ -340,6 +358,13 @@ fn format_phrase_roman(phrase: &AccentPhrase) -> String {
     out
 }
 
+fn format_phrase(phrase: &AccentPhrase, format: OutputFormat) -> String {
+    match format {
+        OutputFormat::Kana => format_phrase_kana(phrase),
+        OutputFormat::Roman => format_phrase_roman(phrase),
+    }
+}
+
 // ── 公開 API ─────────────────────────────────────────────────────────────────
 
 /// NJD ノードデータから音声記号列を構築する
@@ -349,7 +374,7 @@ pub fn nodes_to_phoneme(nodes: &[NodeData], format: OutputFormat) -> String {
 
     if pairs.is_empty() {
         return match format {
-            OutputFormat::Kana  => "。".to_string(),
+            OutputFormat::Kana => "。".to_string(),
             OutputFormat::Roman => ".".to_string(),
         };
     }
@@ -357,16 +382,78 @@ pub fn nodes_to_phoneme(nodes: &[NodeData], format: OutputFormat) -> String {
     let mut out = String::new();
 
     for (phrase, delim) in &pairs {
-        let phrase_str = match format {
-            OutputFormat::Kana  => format_phrase_kana(phrase),
-            OutputFormat::Roman => format_phrase_roman(phrase),
-        };
+        let phrase_str = format_phrase(phrase, format);
         out.push_str(&phrase_str);
-        out.push_str(match format {
-            OutputFormat::Kana  => delim.kana_str(),
-            OutputFormat::Roman => delim.roman_str(),
-        });
+        out.push_str(delim.as_str(format));
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{nodes_to_phoneme, NodeData, OutputFormat};
+
+    fn spoken_node(moras: &[(&str, bool)], accent: usize, chain_with_prev: bool) -> NodeData {
+        NodeData {
+            original: moras.iter().map(|(mora, _)| *mora).collect(),
+            pron_moras: moras
+                .iter()
+                .map(|(mora, is_voiced)| ((*mora).to_string(), *is_voiced))
+                .collect(),
+            accent,
+            chain_with_prev,
+            is_pron_empty: false,
+            is_touten: false,
+            is_question: false,
+        }
+    }
+
+    fn ascii_symbol_node(symbol: &str) -> NodeData {
+        NodeData {
+            original: symbol.to_string(),
+            pron_moras: Vec::new(),
+            accent: 0,
+            chain_with_prev: false,
+            is_pron_empty: false,
+            is_touten: false,
+            is_question: false,
+        }
+    }
+
+    #[test]
+    fn empty_input_defaults_to_sentence_end() {
+        assert_eq!(nodes_to_phoneme(&[], OutputFormat::Kana), "。");
+        assert_eq!(nodes_to_phoneme(&[], OutputFormat::Roman), ".");
+    }
+
+    #[test]
+    fn implicit_phrase_and_sentence_delimiters_are_added() {
+        let nodes = [
+            spoken_node(&[("カ", true)], 0, false),
+            spoken_node(&[("キ", true)], 0, false),
+        ];
+
+        assert_eq!(nodes_to_phoneme(&nodes, OutputFormat::Kana), "か/き。");
+        assert_eq!(nodes_to_phoneme(&nodes, OutputFormat::Roman), "ka/ki.");
+    }
+
+    #[test]
+    fn ascii_punctuation_is_detected_without_pronunciation() {
+        let nodes = [
+            spoken_node(&[("コ", true), ("レ", true)], 0, false),
+            ascii_symbol_node(","),
+            spoken_node(&[("デ", true)], 1, false),
+        ];
+
+        assert_eq!(nodes_to_phoneme(&nodes, OutputFormat::Kana), "これ、で'。");
+        assert_eq!(nodes_to_phoneme(&nodes, OutputFormat::Roman), "kore,de'.");
+    }
+
+    #[test]
+    fn devoiced_sokuon_uses_following_consonant_in_roman_output() {
+        let nodes = [spoken_node(&[("ッ", true), ("キ", false)], 0, false)];
+
+        assert_eq!(nodes_to_phoneme(&nodes, OutputFormat::Roman), "k_ki.");
+    }
 }
