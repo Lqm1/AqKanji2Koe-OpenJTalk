@@ -7,8 +7,8 @@
 //!
 //! ## 出力形式
 //!
-//! - **かな記法** — ひらがな + 半角記号 (AquesTalk 標準入力形式、UTF-8)
-//! - **ローマ字記法** — ASCII のみ (AquesTalk pico 準拠)
+//! - **かな記法**: ひらがな + 半角記号 (AquesTalk 標準入力形式、UTF-8)
+//! - **ローマ字記法**: ASCII のみ (AquesTalk pico 準拠)
 //!
 //! ## 基本的な使い方
 //!
@@ -38,14 +38,11 @@ use jpreprocess::{JPreprocess, SystemDictionaryConfig};
 
 type ProcessFn = dyn Fn(&str) -> Result<Vec<NodeData>> + Send + Sync;
 
-// ── AqKanji2Koe 本体 ────────────────────────────────────────────────────────
-
-/// 漢字かな交じりテキスト → AquesTalk 音声記号列 変換器
+/// 漢字かな交じりテキストを AquesTalk 音声記号列に変換する。
 ///
 /// jpreprocess (OpenJTalk) と NAIST-JDic をバンドルして使用する。
 /// スレッド間で共有可能 (`Send + Sync`)。
 pub struct AqKanji2Koe {
-    /// テキスト → NodeData 列 の処理関数（型消去済み）
     process: Box<ProcessFn>,
 }
 
@@ -63,8 +60,7 @@ impl AqKanji2Koe {
         let jp = JPreprocess::with_dictionaries(system, None);
 
         let process = Box::new(move |text: &str| -> Result<Vec<NodeData>> {
-            // text_to_njd は形態素解析のみ。
-            // preprocess() を呼ぶことでアクセント句連結・無声化フラグが確定する。
+            // preprocess() でアクセント句連結と無声化フラグを確定させる。
             let mut njd = jp
                 .text_to_njd(text)
                 .map_err(|e| Error::Processing(e.to_string()))?;
@@ -75,17 +71,12 @@ impl AqKanji2Koe {
                 .iter()
                 .map(|node| {
                     let pron = node.get_pron();
-                    // pron.moras() の各 Mora から (カタカナ文字列, is_voiced) を抽出する。
-                    // Mora::Display は is_voiced=false のとき末尾に "'" を追加するため、
-                    // strip_suffix で除去してカタカナのみを取り出す。
-                    // jpreprocess の Mora::Display は無声化時に U+2019 RIGHT SINGLE
-                    // QUOTATION MARK (') を末尾に付加する。これを取り除いてカタカナだけを得る。
+                    // jpreprocess は無声化モーラの末尾に U+2019 を付けるので除去する。
                     let pron_moras: Vec<(String, bool)> = pron
                         .moras()
                         .iter()
                         .map(|m| {
                             let rendered = m.to_string();
-                            // U+2019 RIGHT SINGLE QUOTATION MARK を除去
                             let katakana = rendered
                                 .strip_suffix('\u{2019}')
                                 .unwrap_or(&rendered)
@@ -116,8 +107,6 @@ impl AqKanji2Koe {
         Ok(nodes_to_phoneme(&nodes, format))
     }
 
-    // ── かな出力 ───────────────────────────────────────────────────────────
-
     /// 漢字かな交じりテキストを **かな音声記号列** (UTF-8) に変換する。
     ///
     /// 出力例: `"これわ/おんせ'ーきごーです。"`
@@ -128,8 +117,6 @@ impl AqKanji2Koe {
     pub fn convert(&self, text: &str) -> Result<String> {
         self.convert_with_format(text, OutputFormat::Kana)
     }
-
-    // ── ローマ字出力 ───────────────────────────────────────────────────────
 
     /// 漢字かな交じりテキストを **ローマ字音声記号列** (ASCII) に変換する。
     ///

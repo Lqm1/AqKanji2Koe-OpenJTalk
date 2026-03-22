@@ -4,11 +4,9 @@ use std::io::{self, BufRead, Write};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    // 引数パース
     let use_roman = args.iter().any(|a| a == "--roman" || a == "-r");
     let text_arg = args.iter().skip(1).find(|a| !a.starts_with('-')).cloned();
 
-    // 変換器を初期化
     let converter = AqKanji2Koe::new().unwrap_or_else(|e| {
         eprintln!("初期化エラー: {e}");
         std::process::exit(1);
@@ -23,7 +21,6 @@ fn main() {
     };
 
     if let Some(text) = text_arg {
-        // コマンドライン引数からテキスト変換
         match convert(&text) {
             Ok(result) => println!("{result}"),
             Err(e) => {
@@ -32,7 +29,6 @@ fn main() {
             }
         }
     } else {
-        // stdin から 1 行ずつ読んで変換
         let stdin = io::stdin();
         let stdout = io::stdout();
         let mut out = stdout.lock();

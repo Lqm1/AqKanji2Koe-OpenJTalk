@@ -3,35 +3,31 @@ use crate::phoneme::{
     devoiced_kana, devoiced_roman, get_doubling_consonant, katakana_mora_to_roman,
 };
 
-// ── 出力形式 ────────────────────────────────────────────────────────────────
-
-/// 音声記号列の出力形式
+/// 音声記号列の出力形式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
-    /// ひらがなかな記法（AquesTalk 標準）
+    /// AquesTalk 標準のひらがな表記。
     Kana,
-    /// ASCII ローマ字記法（AquesTalk pico 準拠）
+    /// AquesTalk pico 準拠の ASCII ローマ字表記。
     Roman,
 }
 
-// ── 句切記号 ────────────────────────────────────────────────────────────────
-
-/// アクセント句の後に続く区切り記号
+/// アクセント句の後ろに置く区切り記号。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delimiter {
-    /// `。` / `.` — 文末（ポーズあり）
+    /// `。` または `.` に対応する文末記号。
     Period,
-    /// `？` / `?` — 文末疑問形（ポーズあり）
+    /// `？` または `?` に対応する疑問文末記号。
     Question,
-    /// `、` / `,` — 呼気段落境界（ポーズあり）
+    /// `、` または `,` に対応する区切り記号。
     Comma,
-    /// `;` — 次句が高い音で始まる（ポーズなし）
+    /// `;` に対応する区切り記号。
     Semicolon,
-    /// `/` — 通常のアクセント句区切り（ポーズなし）
+    /// `/` に対応する通常のアクセント句区切り。
     Slash,
-    /// `+` — 副次アクセント句区切り（ポーズなし）
+    /// `+` に対応する副次アクセント句区切り。
     Plus,
-    /// 半角スペース — 呼気段落境界（ポーズあり）
+    /// 半角スペースに対応する区切り記号。
     Space,
 }
 
@@ -67,7 +63,7 @@ impl Delimiter {
         self.as_str(OutputFormat::Roman)
     }
 
-    /// ポーズを伴う区切りか（無声化判定に使用）
+    /// ポーズを伴う区切りかどうかを返す。
     pub fn is_before_pause(self) -> bool {
         matches!(
             self,
@@ -80,46 +76,37 @@ impl Delimiter {
     }
 }
 
-// ── 内部データ構造 ───────────────────────────────────────────────────────────
-
-/// NJD ノードから抽出した最小限のデータ
+/// NJD ノードから抽出した最小限のデータ。
 #[derive(Debug, Clone)]
 pub struct NodeData {
-    /// 元テキスト（記号判定用）
+    /// 記号判定に使う元テキスト。
     pub original: String,
-    /// (カタカナモーラ文字列, 有声フラグ) のリスト
+    /// `(カタカナモーラ文字列, 有声フラグ)` の列。
     ///
-    /// jpreprocess の `Pronunciation::moras()` から構築する。
     /// `is_voiced = false` はそのモーラが無声化されていることを示す。
     pub pron_moras: Vec<(String, bool)>,
-    /// アクセント位置（0 = 平板、N = 第 N モーラ後に下降）
+    /// アクセント位置。`0` は平板。
     pub accent: usize,
-    /// 前のノードと同じアクセント句に連結するか
+    /// 前のノードと同じアクセント句に連結するかどうか。
     pub chain_with_prev: bool,
-    /// 発音が空（読点・句点などの無音ノード）
+    /// 発音が空かどうか。
     pub is_pron_empty: bool,
-    /// 読点/句点ノード
+    /// 読点・句点として扱うノードかどうか。
     pub is_touten: bool,
-    /// 疑問符ノード
+    /// 疑問符として扱うノードかどうか。
     pub is_question: bool,
 }
 
-/// 1 つのアクセント句
 #[derive(Debug, Clone)]
 struct AccentPhrase {
-    /// (カタカナモーラ文字列, 有声フラグ) のリスト
     moras: Vec<(String, bool)>,
-    /// アクセント核の位置（0 = 平板）
     accent: usize,
 }
 
-/// ビルダー内部アイテム
 enum Item {
     Phrase(AccentPhrase),
     Delim(Delimiter),
 }
-
-// ── フレーズ構築 ─────────────────────────────────────────────────────────────
 
 fn flush_phrase(items: &mut Vec<Item>, moras: &mut Vec<(String, bool)>, accent: usize) {
     if moras.is_empty() {
@@ -132,14 +119,12 @@ fn flush_phrase(items: &mut Vec<Item>, moras: &mut Vec<(String, bool)>, accent: 
     }));
 }
 
-/// NJD ノード列をアクセント句と区切り記号のアイテム列に変換する
 fn build_items(nodes: &[NodeData]) -> Vec<Item> {
     let mut items: Vec<Item> = Vec::new();
     let mut cur_moras: Vec<(String, bool)> = Vec::new();
     let mut cur_accent: usize = 0;
 
     for node in nodes {
-        // ── 区切り記号ノード ──────────────────────────────────────────────
         if let Some(delim) = detect_delimiter(node) {
             flush_phrase(&mut items, &mut cur_moras, cur_accent);
             items.push(Item::Delim(delim));
@@ -147,29 +132,20 @@ fn build_items(nodes: &[NodeData]) -> Vec<Item> {
         }
 
         if node.is_pron_empty || node.pron_moras.is_empty() {
-            // 発音なし・区切りでもないノード（記号等）はスキップ
             continue;
         }
 
-        // ── 通常の発音ノード ──────────────────────────────────────────────
         if !node.chain_with_prev || cur_moras.is_empty() {
-            // 新しいアクセント句の始まり
             flush_phrase(&mut items, &mut cur_moras, cur_accent);
             cur_accent = node.accent;
         }
-        // このノードのモーラを追加
         cur_moras.extend(node.pron_moras.iter().cloned());
     }
 
-    // 残ったモーラをフラッシュ
     flush_phrase(&mut items, &mut cur_moras, cur_accent);
     items
 }
 
-/// アイテム列をアクセント句と後続区切り記号のペアに変換する
-///
-/// - フレーズの後に区切り記号がない場合は Slash をデフォルトで使う
-/// - 最後のフレーズに区切り記号がない場合は Period を付加する
 fn pair_phrases(items: Vec<Item>) -> Vec<(AccentPhrase, Delimiter)> {
     let mut result: Vec<(AccentPhrase, Delimiter)> = Vec::new();
     let mut pending: Option<AccentPhrase> = None;
@@ -185,7 +161,7 @@ fn pair_phrases(items: Vec<Item>) -> Vec<(AccentPhrase, Delimiter)> {
                 if let Some(p) = pending.take() {
                     result.push((p, d));
                 } else if matches!(d, Delimiter::Period | Delimiter::Question) {
-                    // 直前にフレーズがない文末記号 → 前のフレーズの区切りを更新
+                    // 連続した文末記号は、直前の句の区切りとして扱う。
                     if let Some(last) = result.last_mut() {
                         last.1 = d;
                     }
@@ -198,7 +174,7 @@ fn pair_phrases(items: Vec<Item>) -> Vec<(AccentPhrase, Delimiter)> {
         result.push((p, Delimiter::Period));
     }
 
-    // 末尾が Period/Question でない場合は Period を付加
+    // 最後の句は常に文末記号で閉じる。
     if result
         .last()
         .map(|(_, d)| !d.is_sentence_end())
@@ -212,7 +188,6 @@ fn pair_phrases(items: Vec<Item>) -> Vec<(AccentPhrase, Delimiter)> {
     result
 }
 
-/// ノードデータから区切り記号を検出する
 fn detect_delimiter(node: &NodeData) -> Option<Delimiter> {
     if node.is_question {
         return Some(Delimiter::Question);
@@ -225,7 +200,6 @@ fn detect_delimiter(node: &NodeData) -> Option<Delimiter> {
             .or_else(|| node.is_touten.then_some(Delimiter::Comma));
     }
 
-    // 半角記号が入力に含まれていた場合も検出
     if node.pron_moras.is_empty() {
         return delimiter_from_ascii_symbol(s);
     }
@@ -255,34 +229,24 @@ fn delimiter_from_ascii_symbol(symbol: &str) -> Option<Delimiter> {
     }
 }
 
-// ── フォーマット ──────────────────────────────────────────────────────────────
-
-/// アクセント句をかな記法でフォーマットする
-///
-/// - 有声モーラ → ひらがな
-/// - 無声化モーラ → `_カタカナ` (spec §無声化手動指定)
-/// - アクセント核の直後に `'`
 fn format_phrase_kana(phrase: &AccentPhrase) -> String {
     let mut out = String::new();
 
     for (i, (mora, is_voiced)) in phrase.moras.iter().enumerate() {
-        let mora_idx = i + 1; // 1-indexed
+        let mora_idx = i + 1;
 
         if mora == "ッ" {
             out.push('っ');
         } else if !is_voiced {
-            // 無声化: _カタカナ表記
             if let Some(d) = devoiced_kana(mora) {
                 out.push_str(&d);
             } else {
-                // 仕様にない無声化モーラはひらがなで出力
                 out.push_str(&mora_katakana_to_hiragana(mora));
             }
         } else {
             out.push_str(&mora_katakana_to_hiragana(mora));
         }
 
-        // アクセント核マーカー
         if phrase.accent > 0 && mora_idx == phrase.accent {
             out.push('\'');
         }
@@ -291,21 +255,14 @@ fn format_phrase_kana(phrase: &AccentPhrase) -> String {
     out
 }
 
-/// アクセント句をローマ字記法でフォーマットする
-///
-/// - ッ → 後続モーラの語頭子音を重ねる（子音連続）、末尾は xtu
-/// - 無声化モーラ → `_roman`
-/// - アクセント核の直後に `'`
 fn format_phrase_roman(phrase: &AccentPhrase) -> String {
     let mut out = String::new();
-    // ッ から来た保留子音（次のモーラの頭に付ける）
     let mut pending_double: Option<char> = None;
 
     for (i, (mora, is_voiced)) in phrase.moras.iter().enumerate() {
-        let mora_idx = i + 1; // 1-indexed
+        let mora_idx = i + 1;
 
         if mora == "ッ" {
-            // 後続モーラの語頭子音で連続させる
             let double_char = if i + 1 < phrase.moras.len() {
                 let (next_mora, next_voiced) = &phrase.moras[i + 1];
                 let next_roman = if !next_voiced {
@@ -321,26 +278,22 @@ fn format_phrase_roman(phrase: &AccentPhrase) -> String {
             if let Some(c) = double_char {
                 pending_double = Some(c);
             } else {
-                // 末尾ッ または母音始まり後続 → xtu
                 if let Some(c) = pending_double.take() {
                     out.push(c);
                 }
                 out.push_str("xtu");
             }
 
-            // ッ もモーラなのでアクセントマーカーを確認
             if phrase.accent > 0 && mora_idx == phrase.accent {
                 out.push('\'');
             }
             continue;
         }
 
-        // 保留していた二重子音を出力
         if let Some(c) = pending_double.take() {
             out.push(c);
         }
 
-        // モーラのローマ字（有声/無声で分岐）
         let roman = if !is_voiced {
             devoiced_roman(mora).unwrap_or_else(|| katakana_mora_to_roman(mora))
         } else {
@@ -349,7 +302,6 @@ fn format_phrase_roman(phrase: &AccentPhrase) -> String {
 
         out.push_str(roman);
 
-        // アクセント核マーカー
         if phrase.accent > 0 && mora_idx == phrase.accent {
             out.push('\'');
         }
@@ -365,9 +317,7 @@ fn format_phrase(phrase: &AccentPhrase, format: OutputFormat) -> String {
     }
 }
 
-// ── 公開 API ─────────────────────────────────────────────────────────────────
-
-/// NJD ノードデータから音声記号列を構築する
+/// NJD ノード列から音声記号列を構築する。
 pub fn nodes_to_phoneme(nodes: &[NodeData], format: OutputFormat) -> String {
     let items = build_items(nodes);
     let pairs = pair_phrases(items);
