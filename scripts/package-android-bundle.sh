@@ -20,5 +20,5 @@ for abi in armeabi-v7a arm64-v8a x86 x86_64; do
   cp "android-jni/${abi}/libaqkanji2koe.so" "${stage}/jniLibs/${abi}/"
 done
 
-rm -f "dist/${bundle}.zip"
-tar -a -cf "dist/${bundle}.zip" -C dist "${bundle}"
+rm -f "dist/${bundle}.tar.gz"
+tar -czf "dist/${bundle}.tar.gz" -C dist "${bundle}"

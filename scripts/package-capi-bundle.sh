@@ -52,5 +52,5 @@ for file in "${files[@]}"; do
   cp "${build_dir}/${file}" "$stage/"
 done
 
-rm -f "dist/${bundle}.zip"
-tar -a -cf "dist/${bundle}.zip" -C dist "${bundle}"
+rm -f "dist/${bundle}.tar.gz"
+tar -czf "dist/${bundle}.tar.gz" -C dist "${bundle}"

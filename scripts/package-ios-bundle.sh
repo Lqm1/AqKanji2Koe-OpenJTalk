@@ -16,5 +16,5 @@ if [[ -f LICENSE ]]; then
   cp LICENSE "$stage/"
 fi
 
-rm -f "dist/${bundle}.zip"
-tar -a -cf "dist/${bundle}.zip" -C dist "${bundle}"
+rm -f "dist/${bundle}.tar.gz"
+tar -czf "dist/${bundle}.tar.gz" -C dist "${bundle}"
