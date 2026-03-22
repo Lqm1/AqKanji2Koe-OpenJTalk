@@ -84,6 +84,17 @@ println!("{roman}"); // nihonngono/te'_kisutode_su.
 
 ## C ABI ライブラリ (`aqkanji2koe-capi`)
 
+### 配布
+
+GitHub のタグ `v*` でリリースすると、GitHub Releases に OS ごとの C ABI バンドルを自動添付します。
+バンドルにはライブラリ本体、C ヘッダ `include/aqkanji2koe.h`、`README.md` が含まれます。
+
+例:
+
+- `aqkanji2koe-capi-v0.1.0-x86_64-pc-windows-msvc.zip`
+- `aqkanji2koe-capi-v0.1.0-x86_64-unknown-linux-gnu.zip`
+- `aqkanji2koe-capi-v0.1.0-aarch64-apple-darwin.zip`
+
 ### ビルド
 
 ```sh
@@ -98,7 +109,7 @@ cargo build --release -p aqkanji2koe-capi --target i686-pc-windows-msvc
 
 | プラットフォーム | 動的ライブラリ | 静的ライブラリ |
 |---|---|---|
-| Windows | `aqkanji2koe.dll` | `aqkanji2koe.lib` |
+| Windows | `aqkanji2koe.dll` (`aqkanji2koe.dll.lib` は import library) | `aqkanji2koe.lib` |
 | Linux | `libaqkanji2koe.so` | `libaqkanji2koe.a` |
 | macOS | `libaqkanji2koe.dylib` | `libaqkanji2koe.a` |
 
