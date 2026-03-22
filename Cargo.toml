@@ -1,6 +1,16 @@
+[workspace]
+members = [".", "crates/aqkanji2koe", "crates/aqkanji2koe-capi"]
+resolver = "2"
+
 [package]
-name = "aqkanji2koe-openjtalk"
+name = "aqkanji2koe-cli"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "CLI tool for converting Japanese text to AquesTalk phoneme notation"
+
+[[bin]]
+name = "aqkanji2koe"
+path = "src/main.rs"
 
 [dependencies]
+aqkanji2koe = { path = "crates/aqkanji2koe" }

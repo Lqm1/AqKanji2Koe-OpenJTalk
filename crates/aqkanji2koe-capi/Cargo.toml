@@ -1,0 +1,14 @@
+[package]
+name = "aqkanji2koe-capi"
+version = "0.1.0"
+edition = "2021"
+description = "C ABI wrapper for aqkanji2koe — builds as a cdylib (.dll/.so/.dylib) and staticlib"
+
+[lib]
+# cdylib = shared library (.dll / .so / .dylib)
+# staticlib = static library (.lib / .a)  for linking into other native projects
+name = "aqkanji2koe"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+aqkanji2koe = { path = "../aqkanji2koe" }

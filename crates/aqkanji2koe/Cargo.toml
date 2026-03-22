@@ -1,0 +1,13 @@
+[package]
+name = "aqkanji2koe"
+version = "0.1.0"
+edition = "2021"
+description = "Japanese kanji/kana to AquesTalk phoneme notation converter using jpreprocess/OpenJTalk"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+jpreprocess = { version = "0.13", features = ["naist-jdic"] }
+thiserror = "2"
